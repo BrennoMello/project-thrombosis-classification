@@ -1,0 +1,20 @@
+version: '3.7'
+
+services:
+    thrombo-service:
+        container_name: ${CONTAINER}
+        image: ${IMAGE}
+#        deploy:
+#            resources:
+#                reservations:
+#                    devices:
+#                      - capabilities: [gpu]
+        build:
+            context: .
+            dockerfile: Dockerfile
+            args:
+                HOME: ${EAPP}
+        volumes:
+        - '${APP}:${EAPP}'
+        - '${DATA}:${EDATA}'
+        command: jupyter-lab --ip 0.0.0.0 --no-browser --allow-root

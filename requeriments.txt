@@ -1,0 +1,17 @@
+numpy
+pandas
+python-multipart
+scikit-learn
+keras
+seaborn
+matplotlib
+scikit-image
+tdqm
+pyarrow
+jupyterlab
+loguru
+networkx[all]
+xgboost
+hyperopt
+imblearn
+rpy2

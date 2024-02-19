@@ -1,0 +1,3575 @@
+
+R version 4.1.2 (2021-11-01) -- "Bird Hippie"
+Copyright (C) 2021 The R Foundation for Statistical Computing
+Platform: x86_64-pc-linux-gnu (64-bit)
+
+R is free software and comes with ABSOLUTELY NO WARRANTY.
+You are welcome to redistribute it under certain conditions.
+Type 'license()' or 'licence()' for distribution details.
+
+  Natural language support but running in an English locale
+
+R is a collaborative project with many contributors.
+Type 'contributors()' for more information and
+'citation()' on how to cite R or R packages in publications.
+
+Type 'demo()' for some demos, 'help()' for on-line help, or
+'help.start()' for an HTML browser interface to help.
+Type 'q()' to quit R.
+
+[Previously saved workspace restored]
+
+> #######################################################
+> # Main Code implemented to run all experiments using
+> # classification
+> #######################################################
+> # This code is part of the Hema-Class framework
+> # Date: December, 2020
+> #
+> # Developers: Tiago Lopes, 
+> #		Ricardo Rios, 
+> #		Tatiane Nogueira, 
+> #		Rodrigo Mello
+> #
+> # GNU General Public License v3.0
+> # Permissions of this strong copyleft license are 
+> #	conditioned on making available complete 
+> #	source code of licensed works and 
+> #	modifications, which include larger works 
+> #	using a licensed work, under the same license. 
+> #	Copyright and license notices must be 
+> #	preserved. Contributors provide an express 
+> #	grant of patent rights.
+> #######################################################
+> 
+> ###
+> # chose which dataset you'd like to analyze
+> ###
+> rm(list=ls())
+> ### default dataset
+> source("src/preprocessing/load-data-classif.R")
+
+Attaching package: ‘dplyr’
+
+The following objects are masked from ‘package:stats’:
+
+    filter, lag
+
+The following objects are masked from ‘package:base’:
+
+    intersect, setdiff, setequal, union
+
+
+Attaching package: ‘reshape’
+
+The following object is masked from ‘package:dplyr’:
+
+    rename
+
+Loading required package: ParamHelpers
+Warning message: 'mlr' is in 'maintenance-only' mode since July 2019.
+Future development will only happen in 'mlr3'
+(<https://mlr3.mlr-org.com>). Due to the focus on 'mlr3' there might be
+uncaught bugs meanwhile in {mlr} - please consider switching.
+
+Attaching package: ‘BBmisc’
+
+The following objects are masked from ‘package:dplyr’:
+
+    coalesce, collapse
+
+The following object is masked from ‘package:base’:
+
+    isFALSE
+
+Using  as id variables
+Using  as id variables
+> 
+> ###
+> # loading machine learning methods
+> ###
+> source("src/classification/dt.R")
+> source("src/classification/knn.R")
+> source("src/classification/dwnn.R")
+> source("src/classification/rf.R")
+> source("src/classification/svm.R")
+> source("src/classification/naive.R")
+> source("src/classification/xgboost.R")
+> library(UBL)
+Loading required package: MBA
+Loading required package: gstat
+Loading required package: automap
+Loading required package: sp
+Loading required package: randomForest
+randomForest 4.7-1
+Type rfNews() to see new features/changes/bug fixes.
+
+Attaching package: ‘randomForest’
+
+The following object is masked from ‘package:ggplot2’:
+
+    margin
+
+The following object is masked from ‘package:dplyr’:
+
+    combine
+
+> #run.methods<-c("dt", "knn", "dwnn", "rf", "svrpol", "svrrad", "naive", "xgboost")
+> #run.methods<-c("svrrad", "naive", "xgboost") # preparing ensemble
+> #run.methods<-c("svrrad", "naive") # preparing ensemble
+> #run.methods<-c("xgboost") # preparing ensemble
+> run.methods<-c("svrrad", "svrpol", "naive", "rf") # preparing ensemble
+> #run.methods<-c("dt", "naive", "rf")
+> #run.methods<-c("dt", "naive")
+> 
+> ###
+> # create matrices of results
+> ###
+> result.mcc<-matrix(nrow=length(cv.10), ncol=length(run.methods))
+> result.acc<-matrix(nrow=length(cv.10), ncol=length(run.methods))
+> result.kappa<-matrix(nrow=length(cv.10), ncol=length(run.methods))
+> result.auc<-matrix(nrow=length(cv.10), ncol=length(run.methods))
+> result.F1<-matrix(nrow=length(cv.10), ncol=length(run.methods))
+> 
+> pos.name = "Thrombosis"
+> neg.name = "Non_thrombosis"
+> target.name = "type"
+> data.aug = TRUE
+> threshold.interval = seq(0.45, 0.7, 0.05)
+> measure.train = list(tnr)
+> 
+> for(threshold.class in threshold.interval){
++   cat("*****\n*****Threshold ", threshold.class, "*****\n")
++ 
++   for(i in 1:length(cv.10)){
++     cat("*****\n*****Iteration ", i, "*****\n")
++     final.prob<-c()  
++     
++     if (data.aug){
++       #####with data augmentation#####
++       aug.data = GaussNoiseClassif(type ~ ., dat=hemo.data[-unlist(cv.10[[i]]),], C.perc="extreme")  
++       train.tsk <- mlr::makeClassifTask(data = rbind(aug.data, hemo.data[-unlist(cv.10[[i]]),]), target = target.name)  
++     }else{
++       ######without data augmentation#####
++       train.tsk <- mlr::makeClassifTask(data = hemo.data[-unlist(cv.10[[i]]),], target = target.name, positive = pos.name)
++     }
++     #####
++     test.tsk <- mlr::makeClassifTask(data = hemo.data[unlist(cv.10[[i]]),], target = target.name, positive = pos.name)
++ 
++     final.prob<-cbind(final.prob, unlist(cv.10[[i]]))
++     
++     for(j in 1:length(run.methods)){
++       cat("*****Running ", run.methods[j], "\n")
++       switch (run.methods[j],
++               dt = {
++                 ###
++                 # running dt
++                 ###
++                 eval<-dt.classif(train.task = train.tsk, test.task = test.tsk, 
++                                 measure = list(acc), 
++                                 save.model=paste(sep="", "results/models/model-", run.methods[j], "-", i, ".mod"), 
++                                 threshold = 0.5)
++                 
++                 if(((eval$data$response %>% table()) > 0) %>% all()){
++                   result.acc[i,j] <- measureACC(hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)], eval$data$response) # mean((train[unlist(cv.10[[i]]),ncol(train)] - eval$data$response)^2)
++                   result.kappa[i,j] <- measureKAPPA(hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)], eval$data$response) # sqrt(mse[i])
++                   result.mcc[i,j] <- measureMCC(hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)], eval$data$response, positive = pos.name, negative = neg.name) 
++                   result.auc[i,j] <- measureAUC(hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)], eval$data$response, positive = pos.name, negative = neg.name)
++                   result.F1[i,j] <- measureF1(hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)], eval$data$response, positive = pos.name)
++                 }  
++                 final.prob<-cbind(final.prob, eval$data$prob.Thrombosis)              
++               },
++               knn = {
++                 eval<-knn.classif(train.task = mlr::makeClassifTask(data = hemo.data, target = "Activity"), 
++                                   test.task = unlist(cv.10[[i]]))
++                 
++                 if(((eval %>% table()) > 0) %>% all()){
++                   result.acc[i,j] <- measureACC(hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)], eval) # mean((train[unlist(cv.10[[i]]),ncol(train)] - eval$data$response)^2)
++                   result.kappa[i,j] <- measureKAPPA(hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)], eval) # sqrt(mse[i])
++                   result.mcc[i,j] <- measureMCC(hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)], eval, positive = pos.name, negative = neg.name) 
++                   result.auc[i,j] <- measureAUC(hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)], eval, positive = pos.name, negative = neg.name)
++                   result.F1[i,j] <- measureF1(hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)], eval, positive = pos.name)
++                 }
++               },
++               dwnn = {
++                 eval<-dwnn.classif(train.task = mlr::makeClassifTask(data = hemo.data, target = "Activity"), 
++                                   test.task = unlist(cv.10[[i]]))
++                 
++                 if(((eval %>% table()) > 0) %>% all()){
++                   result.acc[i,j] <- measureACC(hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)], eval) # mean((train[unlist(cv.10[[i]]),ncol(train)] - eval$data$response)^2)
++                   result.kappa[i,j] <- measureKAPPA(hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)], eval) # sqrt(mse[i])
++                   result.mcc[i,j] <- measureMCC(hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)], eval, positive = pos.name, negative = neg.name) 
++                   result.auc[i,j] <- measureAUC(hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)], eval, positive = pos.name, negative = neg.name)
++                   result.F1[i,j] <- measureF1(hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)], eval, positive = pos.name)
++                 }
++               },
++               rf = {
++                 eval<-randomForest.classif(train.task = train.tsk, test.task = test.tsk, 
++                                           measure = measure.train, 
++                                           save.model=paste(sep="", "results/models/model-", run.methods[j], "-", i, ".mod"), 
++                                           threshold = threshold.class)
++                 
++                 if(((eval$data$response %>% table()) > 0) %>% all()){
++                   result.acc[i,j] <- measureACC(hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)], eval$data$response) # mean((train[unlist(cv.10[[i]]),ncol(train)] - eval$data$response)^2)
++                   result.kappa[i,j] <- measureKAPPA(hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)], eval$data$response) # sqrt(mse[i])
++                   result.mcc[i,j] <- measureMCC(hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)], eval$data$response, positive = pos.name, negative = neg.name) 
++                   result.auc[i,j] <- measureAUC(hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)], eval$data$response, positive = pos.name, negative = neg.name)
++                   result.F1[i,j] <- measureF1(hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)], eval$data$response, positive = pos.name)
++                 }
++                 final.prob<-cbind(final.prob, eval$data$prob.Thrombosis)
++               },
++               svrpol = {
++                 eval<-svm.classif(train.task = train.tsk, test.task = test.tsk, 
++                                   measure = measure.train, 
++                                   save.model=paste(sep="", "results/models/model-", run.methods[j], "-", i, ".mod"), 
++                                   pol=TRUE, threshold = threshold.class)
++                 
++                 if(((eval$data$response %>% table()) > 0) %>% all()){
++                   result.acc[i,j] <- measureACC(hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)], eval$data$response) # mean((train[unlist(cv.10[[i]]),ncol(train)] - eval$data$response)^2)
++                   result.kappa[i,j] <- measureKAPPA(hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)], eval$data$response) # sqrt(mse[i])
++                   result.mcc[i,j] <- measureMCC(hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)], eval$data$response, positive = pos.name, negative = neg.name) 
++                   result.auc[i,j] <- measureAUC(hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)], eval$data$response, positive = pos.name, negative = neg.name)
++                   result.F1[i,j] <- measureF1(hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)], eval$data$response, positive = pos.name)
++                 }
++                 final.prob<-cbind(final.prob, eval$data$prob.Thrombosis)
++               },
++               svrrad = {
++                 eval<-svm.classif(train.task = train.tsk, test.task = test.tsk, 
++                                   measure = measure.train, 
++                                   save.model=paste(sep="", "results/models/model-", run.methods[j], "-", i, ".mod"), 
++                                   pol=FALSE, threshold = threshold.class)
++                 
++                 if(((eval$data$response %>% table()) > 0) %>% all()){
++                   result.acc[i,j] <- measureACC(hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)], eval$data$response) # mean((train[unlist(cv.10[[i]]),ncol(train)] - eval$data$response)^2)
++                   result.kappa[i,j] <- measureKAPPA(hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)], eval$data$response) # sqrt(mse[i])
++                   result.mcc[i,j] <- measureMCC(hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)], eval$data$response, positive = pos.name, negative = neg.name) 
++                   result.auc[i,j] <- measureAUC(hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)], eval$data$response, positive = pos.name, negative = neg.name)
++                   result.F1[i,j] <- measureF1(hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)], eval$data$response, positive = pos.name)
++                 }
++                 final.prob<-cbind(final.prob, eval$data$prob.Thrombosis)
++               },
++               naive = {
++                 eval<-naiveBayes.classif(train.task = train.tsk, test.task = test.tsk, 
++                                         measure = measure.train, 
++                                         save.model=paste(sep="", "results/models/model-", run.methods[j], "-", i, ".mod"), 
++                                         threshold = threshold.class)
++                 
++                 if(((eval$data$response %>% table()) > 0) %>% all()){
++                   result.acc[i,j] <- measureACC(hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)], eval$data$response) # mean((train[unlist(cv.10[[i]]),ncol(train)] - eval$data$response)^2)
++                   result.kappa[i,j] <- measureKAPPA(hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)], eval$data$response) # sqrt(mse[i])
++                   result.mcc[i,j] <- measureMCC(hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)], eval$data$response, positive = pos.name, negative = neg.name) 
++                   result.auc[i,j] <- measureAUC(hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)], eval$data$response, positive = pos.name, negative = neg.name)
++                   result.F1[i,j] <- measureF1(hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)], eval$data$response, positive = pos.name)
++                 }
++                 final.prob<-cbind(final.prob, eval$data$prob.Thrombosis)
++               },
++               xgboost = {
++                 eval<-xgboost.classif(train.task = train.tsk, test.task = test.tsk, 
++                                       measure = measure.train, 
++                                       save.model=paste(sep="", "results/models/model-", run.methods[j], "-", i, ".mod"), 
++                                       threshold = threshold.class)
++                 
++                 if(((eval$data$response %>% table()) > 0) %>% all()){
++                   result.acc[i,j] <- measureACC(hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)], eval$data$response) # mean((train[unlist(cv.10[[i]]),ncol(train)] - eval$data$response)^2)
++                   result.kappa[i,j] <- measureKAPPA(hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)], eval$data$response) # sqrt(mse[i])
++                   result.mcc[i,j] <- measureMCC(hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)], eval$data$response, positive = pos.name, negative = neg.name) 
++                   result.auc[i,j] <- measureAUC(hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)], eval$data$response, positive = pos.name, negative = neg.name)
++                   result.F1[i,j] <- measureF1(hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)], eval$data$response, positive = pos.name)
++                 }
++                 final.prob<-cbind(final.prob, eval$data$prob.Thrombosis)
++               }
++       )
++       
++     }    
++     final.prob<-cbind(final.prob, 
++                       hemo.data[unlist(cv.10[[i]]),ncol(hemo.data)]%>% as.character())
++     colnames(final.prob)<-c("id", paste(sep="", "high.prob.", run.methods), "truth")
++     write.csv(final.prob, 
++               file=paste(sep="", "results/models/predictions-", i, ".csv"),
++               row.names = F)
++     
++   }
++ 
++   #Saving mean results
++   mean.results = rbind(
++     apply(result.acc %>% na.omit(), 2, mean) %>% round(digits = 2),
++     apply(result.kappa %>% na.omit(), 2, mean) %>% round(digits = 2),
++     apply(result.mcc %>% na.omit(), 2, mean) %>% round(digits = 2),
++     apply(result.auc %>% na.omit(), 2, mean) %>% round(digits = 2),
++     apply(result.F1 %>% na.omit(), 2, mean) %>% round(digits = 2)
++   ) %>% t()
++   rownames(mean.results) = run.methods
++   colnames(mean.results) = c('ACC', 'KAPPA', 'MCC', 'AUC', 'F1')
++   mean.results %>% write.csv(file=paste(sep="", "results/models/test-", threshold.class, ".csv"))
++ 
++   #Saving individual testes
++   colnames(result.acc) = run.methods
++   result.acc %>% write.csv(file=paste(sep="", "results/models/test-acc-", threshold.class, ".csv"))
++   colnames(result.kappa) = run.methods
++   result.kappa %>% write.csv(file=paste(sep="", "results/models/test-kappa-", threshold.class, ".csv"))
++   colnames(result.mcc) = run.methods
++   result.mcc %>% write.csv(file=paste(sep="", "results/models/test-mcc-", threshold.class, ".csv"))
++   colnames(result.auc) = run.methods
++   result.auc %>% write.csv(file=paste(sep="", "results/models/test-auc-", threshold.class, ".csv"))
++   colnames(result.F1) = run.methods
++   result.F1 %>% write.csv(file=paste(sep="", "results/models/test-F1-", threshold.class, ".csv"))
++ 
++   threshold.class = threshold.class+0.05
++ }
+*****
+*****Threshold  0.45 *****
+*****
+*****Iteration  1 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=0.79 : tnr.test.mean=0.5649249
+Time difference of 15.51132 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=1.91; coef0=1; degree=2 : tnr.test.mean=0.7104795
+Time difference of 2.315654 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.241885 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=9; mtry=5; nodesize=1 : tnr.test.mean=0.8777108
+Time difference of 8.189301 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  2 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=1.06 : tnr.test.mean=0.6122819
+Time difference of 15.33838 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=1.81; coef0=0.1; degree=2 : tnr.test.mean=0.6681996
+Time difference of 2.268263 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.26052 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=9; mtry=7; nodesize=1 : tnr.test.mean=0.8989987
+Time difference of 8.016783 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  3 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=1.16 : tnr.test.mean=0.6002090
+Time difference of 15.76841 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=1.71; coef0=1.6; degree=5 : tnr.test.mean=0.6424650
+Time difference of 2.332855 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.258643 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=9; mtry=4; nodesize=1 : tnr.test.mean=0.8985733
+Time difference of 8.142737 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  4 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=0.21 : tnr.test.mean=0.5980181
+Time difference of 15.39279 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=1.91; coef0=1.9; degree=3 : tnr.test.mean=0.6629625
+Time difference of 2.266379 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.271748 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=5; mtry=4; nodesize=1 : tnr.test.mean=0.8814276
+Time difference of 8.188265 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  5 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=0.83 : tnr.test.mean=0.5722787
+Time difference of 15.62022 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=1.91; coef0=1.1; degree=4 : tnr.test.mean=0.6816448
+Time difference of 2.256003 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.26723 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=7; mtry=3; nodesize=1 : tnr.test.mean=0.8975305
+Time difference of 8.17443 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  6 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=0.19 : tnr.test.mean=0.6013223
+Time difference of 15.37149 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=1.71; coef0=2; degree=2 : tnr.test.mean=0.6700970
+Time difference of 2.267995 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.269441 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=9; mtry=7; nodesize=1 : tnr.test.mean=0.8866993
+Time difference of 8.369549 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  7 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=0.03 : tnr.test.mean=0.5688861
+Time difference of 15.38487 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=1.91; coef0=1.2; degree=5 : tnr.test.mean=0.6359893
+Time difference of 2.252293 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.262455 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=7; mtry=7; nodesize=1 : tnr.test.mean=0.8912145
+Time difference of 8.201389 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  8 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=0.62 : tnr.test.mean=0.5653434
+Time difference of 15.5602 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=1.91; coef0=1.8; degree=3 : tnr.test.mean=0.6787391
+Time difference of 2.308136 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.259728 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=9; mtry=1; nodesize=1 : tnr.test.mean=0.8692406
+Time difference of 8.353848 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  9 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=0.36 : tnr.test.mean=0.5536016
+Time difference of 15.81247 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=1.81; coef0=0.1; degree=4 : tnr.test.mean=0.6729381
+Time difference of 2.318785 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.259608 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=5; mtry=1; nodesize=1 : tnr.test.mean=0.8743697
+Time difference of 8.178223 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  10 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=0.8 : tnr.test.mean=0.5363737
+Time difference of 15.79262 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=1.81; coef0=0.4; degree=5 : tnr.test.mean=0.6825112
+Time difference of 2.343993 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.262455 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=9; mtry=7; nodesize=1 : tnr.test.mean=0.9067781
+Time difference of 8.24915 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Threshold  0.5 *****
+*****
+*****Iteration  1 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=1.3 : tnr.test.mean=0.6631489
+Time difference of 15.94583 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=1.91; coef0=0.1; degree=5 : tnr.test.mean=0.7415329
+Time difference of 2.392797 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.259252 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=9; mtry=4; nodesize=1 : tnr.test.mean=0.8914427
+Time difference of 8.354961 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  2 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=1.37 : tnr.test.mean=0.6557132
+Time difference of 15.51648 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=1.81; coef0=1.6; degree=2 : tnr.test.mean=0.7238260
+Time difference of 2.320268 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.269755 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=10; mtry=6; nodesize=1 : tnr.test.mean=0.9072088
+Time difference of 8.245929 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  3 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=0.55 : tnr.test.mean=0.6366660
+Time difference of 16.11106 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=1.81; coef0=0.1; degree=2 : tnr.test.mean=0.7062124
+Time difference of 2.345097 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.304273 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=8; mtry=5; nodesize=1 : tnr.test.mean=0.8545581
+Time difference of 8.231262 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  4 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=1.25 : tnr.test.mean=0.6139580
+Time difference of 15.69585 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=1.91; coef0=1.4; degree=2 : tnr.test.mean=0.7393393
+Time difference of 2.302606 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.25929 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=8; mtry=1; nodesize=1 : tnr.test.mean=0.9009955
+Time difference of 8.261593 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  5 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=0.57 : tnr.test.mean=0.5698224
+Time difference of 15.42266 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=1.91; coef0=0.7; degree=2 : tnr.test.mean=0.7111091
+Time difference of 2.257543 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.263676 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=8; mtry=4; nodesize=1 : tnr.test.mean=0.8875218
+Time difference of 8.244857 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  6 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=1.1 : tnr.test.mean=0.5973958
+Time difference of 15.77924 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=1.91; coef0=1.2; degree=3 : tnr.test.mean=0.7234930
+Time difference of 2.328378 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.256002 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=9; mtry=6; nodesize=1 : tnr.test.mean=0.9128952
+Time difference of 8.32545 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  7 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=0.93 : tnr.test.mean=0.6422958
+Time difference of 15.30534 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=1.91; coef0=1; degree=2 : tnr.test.mean=0.7307469
+Time difference of 2.313487 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.266487 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=9; mtry=4; nodesize=1 : tnr.test.mean=0.9060479
+Time difference of 8.211974 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  8 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=0.71 : tnr.test.mean=0.6317587
+Time difference of 15.88277 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=1.91; coef0=0.7; degree=3 : tnr.test.mean=0.7227746
+Time difference of 2.323672 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.263515 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=7; mtry=4; nodesize=1 : tnr.test.mean=0.9099064
+Time difference of 8.45776 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  9 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=1.4 : tnr.test.mean=0.5911054
+Time difference of 15.89371 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=1.91; coef0=0; degree=2 : tnr.test.mean=0.6770044
+Time difference of 2.368219 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.275031 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=8; mtry=5; nodesize=1 : tnr.test.mean=0.8927032
+Time difference of 8.244939 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  10 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=0.94 : tnr.test.mean=0.6065621
+Time difference of 15.97061 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=1.91; coef0=1; degree=2 : tnr.test.mean=0.7275659
+Time difference of 2.34982 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.270849 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=9; mtry=5; nodesize=1 : tnr.test.mean=0.8826255
+Time difference of 8.093356 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Threshold  0.55 *****
+*****
+*****Iteration  1 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=1.36 : tnr.test.mean=0.6846959
+Time difference of 15.63395 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=1.71; coef0=1.1; degree=3 : tnr.test.mean=0.7804252
+Time difference of 2.286693 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.255744 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=4; mtry=2; nodesize=1 : tnr.test.mean=0.9282162
+Time difference of 8.260967 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  2 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=0.68 : tnr.test.mean=0.7541195
+Time difference of 15.50248 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=1.01; coef0=0.7; degree=5 : tnr.test.mean=0.7739556
+Time difference of 2.326948 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.263048 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=4; mtry=3; nodesize=1 : tnr.test.mean=0.9266709
+Time difference of 8.448595 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  3 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=0.13 : tnr.test.mean=0.6798503
+Time difference of 15.75074 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=1.81; coef0=0.6; degree=4 : tnr.test.mean=0.7788647
+Time difference of 2.354423 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.272872 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=6; mtry=4; nodesize=1 : tnr.test.mean=0.9051375
+Time difference of 8.136893 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  4 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=0.84 : tnr.test.mean=0.7063280
+Time difference of 15.52478 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=1.81; coef0=0.1; degree=2 : tnr.test.mean=0.8000615
+Time difference of 2.26813 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.259466 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=4; mtry=7; nodesize=1 : tnr.test.mean=0.9336513
+Time difference of 8.134776 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  5 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=1.21 : tnr.test.mean=0.6813706
+Time difference of 15.69602 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=1.91; coef0=1.6; degree=2 : tnr.test.mean=0.7766830
+Time difference of 2.291545 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.275505 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=10; mtry=1; nodesize=1 : tnr.test.mean=0.9154135
+Time difference of 8.201598 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  6 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=0.83 : tnr.test.mean=0.6517200
+Time difference of 15.79171 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=1.81; coef0=1; degree=2 : tnr.test.mean=0.7811059
+Time difference of 2.317192 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.269902 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=8; mtry=7; nodesize=1 : tnr.test.mean=0.9260932
+Time difference of 8.347438 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  7 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=0.95 : tnr.test.mean=0.6804306
+Time difference of 15.56946 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=1.91; coef0=0.6; degree=5 : tnr.test.mean=0.7605758
+Time difference of 2.307674 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.253085 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=8; mtry=1; nodesize=1 : tnr.test.mean=0.9162978
+Time difference of 8.358325 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  8 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=1.12 : tnr.test.mean=0.6462232
+Time difference of 15.96182 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=1.91; coef0=1.5; degree=3 : tnr.test.mean=0.7577974
+Time difference of 2.353432 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.272235 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=4; mtry=2; nodesize=1 : tnr.test.mean=0.9349621
+Time difference of 8.307166 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  9 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=0.57 : tnr.test.mean=0.6172100
+Time difference of 16.10456 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=1.91; coef0=1.9; degree=3 : tnr.test.mean=0.7245972
+Time difference of 2.33257 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.302472 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=4; mtry=5; nodesize=1 : tnr.test.mean=0.9188383
+Time difference of 8.298927 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  10 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=1.46 : tnr.test.mean=0.6938819
+Time difference of 15.70993 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=1.91; coef0=1.6; degree=2 : tnr.test.mean=0.7839632
+Time difference of 2.320606 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.28229 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=4; mtry=2; nodesize=1 : tnr.test.mean=0.9051236
+Time difference of 8.202186 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Threshold  0.6 *****
+*****
+*****Iteration  1 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=1.25 : tnr.test.mean=0.7389618
+Time difference of 15.72245 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=1.91; coef0=1.1; degree=5 : tnr.test.mean=0.8166505
+Time difference of 2.315055 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.26655 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=5; mtry=1; nodesize=3 : tnr.test.mean=0.9350317
+Time difference of 8.342927 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  2 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=1.14 : tnr.test.mean=0.7407527
+Time difference of 15.47623 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=0.91; coef0=0.4; degree=2 : tnr.test.mean=0.7792163
+Time difference of 2.284 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.27332 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=5; mtry=1; nodesize=1 : tnr.test.mean=0.9409204
+Time difference of 8.199041 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  3 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=0.44 : tnr.test.mean=0.7679696
+Time difference of 16.15861 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=1.91; coef0=0.2; degree=2 : tnr.test.mean=0.8192548
+Time difference of 2.420761 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.254316 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=5; mtry=3; nodesize=4 : tnr.test.mean=0.9424679
+Time difference of 8.267132 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  4 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=0.21 : tnr.test.mean=0.8034588
+Time difference of 15.62276 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=0.91; coef0=1; degree=4 : tnr.test.mean=0.8251153
+Time difference of 2.275241 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.26618 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=5; mtry=4; nodesize=1 : tnr.test.mean=0.9385980
+Time difference of 8.114102 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  5 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=0.79 : tnr.test.mean=0.7692668
+Time difference of 15.63502 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=1.91; coef0=0.8; degree=3 : tnr.test.mean=0.8156830
+Time difference of 2.309833 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.346847 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=5; mtry=3; nodesize=1 : tnr.test.mean=0.9506021
+Time difference of 8.454037 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  6 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=0.4 : tnr.test.mean=0.7600320
+Time difference of 15.65872 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=1.91; coef0=1.3; degree=5 : tnr.test.mean=0.7877219
+Time difference of 2.325979 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.252392 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=10; mtry=7; nodesize=3 : tnr.test.mean=0.9637872
+Time difference of 8.093075 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  7 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=0.41 : tnr.test.mean=0.7670310
+Time difference of 15.29786 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=1.91; coef0=0.4; degree=2 : tnr.test.mean=0.8390530
+Time difference of 2.253734 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.288222 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=7; mtry=3; nodesize=1 : tnr.test.mean=0.9475896
+Time difference of 8.296163 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  8 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=0.38 : tnr.test.mean=0.7564125
+Time difference of 15.85588 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=1.91; coef0=0.3; degree=3 : tnr.test.mean=0.7982324
+Time difference of 2.360102 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.278316 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=5; mtry=6; nodesize=4 : tnr.test.mean=0.9385616
+Time difference of 8.349815 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  9 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=0.62 : tnr.test.mean=0.6892879
+Time difference of 15.964 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=1.41; coef0=0.5; degree=3 : tnr.test.mean=0.8093370
+Time difference of 2.310301 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.257969 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=5; mtry=7; nodesize=1 : tnr.test.mean=0.9438044
+Time difference of 8.243949 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  10 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=1.28 : tnr.test.mean=0.7747797
+Time difference of 15.68032 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=0.81; coef0=0.6; degree=3 : tnr.test.mean=0.8222509
+Time difference of 2.335942 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.264585 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=5; mtry=2; nodesize=1 : tnr.test.mean=0.9528007
+Time difference of 8.208215 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Threshold  0.65 *****
+*****
+*****Iteration  1 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=0.27 : tnr.test.mean=0.8101040
+Time difference of 15.33673 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=1.31; coef0=0.7; degree=5 : tnr.test.mean=0.8720289
+Time difference of 2.306524 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.273229 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=10; mtry=3; nodesize=1 : tnr.test.mean=0.9465041
+Time difference of 8.362736 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  2 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=1.37 : tnr.test.mean=0.8386392
+Time difference of 15.46153 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=1.01; coef0=1.3; degree=3 : tnr.test.mean=0.8706944
+Time difference of 2.267677 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.288967 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=8; mtry=2; nodesize=1 : tnr.test.mean=0.9689240
+Time difference of 8.185896 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  3 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=0.34 : tnr.test.mean=0.8587037
+Time difference of 16.06687 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=0.11; coef0=0.1; degree=5 : tnr.test.mean=0.8924701
+Time difference of 2.385625 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.267279 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=10; mtry=2; nodesize=3 : tnr.test.mean=0.9482215
+Time difference of 8.259006 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  4 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=1.29 : tnr.test.mean=0.8678792
+Time difference of 15.70981 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=0.71; coef0=1.4; degree=2 : tnr.test.mean=0.8848368
+Time difference of 2.263554 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.250666 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=8; mtry=6; nodesize=1 : tnr.test.mean=0.9583217
+Time difference of 8.3018 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  5 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=0.5 : tnr.test.mean=0.8579936
+Time difference of 15.48793 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=0.51; coef0=1.9; degree=2 : tnr.test.mean=0.8786192
+Time difference of 2.236801 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.263236 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=5; mtry=1; nodesize=1 : tnr.test.mean=0.9490419
+Time difference of 8.118582 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  6 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=0.44 : tnr.test.mean=0.8482975
+Time difference of 15.76561 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=1.31; coef0=0.9; degree=3 : tnr.test.mean=0.8539851
+Time difference of 2.286991 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.270203 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=8; mtry=5; nodesize=1 : tnr.test.mean=0.9544472
+Time difference of 8.19026 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  7 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=0.36 : tnr.test.mean=0.8408131
+Time difference of 15.32237 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=0.51; coef0=0.2; degree=3 : tnr.test.mean=0.8624817
+Time difference of 2.244396 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.297974 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=5; mtry=1; nodesize=1 : tnr.test.mean=0.9454699
+Time difference of 8.218982 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  8 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=0.94 : tnr.test.mean=0.8326782
+Time difference of 15.62009 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=0.91; coef0=0.7; degree=5 : tnr.test.mean=0.8622708
+Time difference of 2.335946 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.267974 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=8; mtry=1; nodesize=1 : tnr.test.mean=0.9618504
+Time difference of 8.515426 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  9 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=0.84 : tnr.test.mean=0.7905096
+Time difference of 15.97394 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=0.01; coef0=0.9; degree=5 : tnr.test.mean=0.8293771
+Time difference of 2.354218 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.265586 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=5; mtry=5; nodesize=3 : tnr.test.mean=0.9477925
+Time difference of 8.313504 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  10 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=1.43 : tnr.test.mean=0.8582473
+Time difference of 15.71687 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=0.61; coef0=1.7; degree=3 : tnr.test.mean=0.8659418
+Time difference of 2.328154 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.265868 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=5; mtry=3; nodesize=7 : tnr.test.mean=0.9397865
+Time difference of 8.211346 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Threshold  0.7 *****
+*****
+*****Iteration  1 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=0.09 : tnr.test.mean=0.9973684
+Time difference of 15.78546 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=0.11; coef0=0.2; degree=2 : tnr.test.mean=1.0000000
+Time difference of 2.36357 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.310213 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=6; mtry=1; nodesize=3 : tnr.test.mean=0.9607813
+Time difference of 8.277119 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  2 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=0.12 : tnr.test.mean=0.9190958
+Time difference of 15.35442 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=0.11; coef0=0.4; degree=2 : tnr.test.mean=0.9666658
+Time difference of 2.304808 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.265753 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=9; mtry=7; nodesize=1 : tnr.test.mean=0.9758026
+Time difference of 8.086297 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  3 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=1.4 : tnr.test.mean=0.9976190
+Time difference of 16.24096 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=0.11; coef0=1; degree=5 : tnr.test.mean=1.0000000
+Time difference of 2.402545 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.260839 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=9; mtry=1; nodesize=1 : tnr.test.mean=0.9623124
+Time difference of 8.353914 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  4 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=1.47 : tnr.test.mean=0.9565287
+Time difference of 15.52881 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=0.11; coef0=2; degree=4 : tnr.test.mean=0.9939394
+Time difference of 2.30331 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.265784 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=6; mtry=1; nodesize=1 : tnr.test.mean=0.9572611
+Time difference of 8.182523 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  5 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=1.3 : tnr.test.mean=0.9901055
+Time difference of 15.67381 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=0.21; coef0=1.4; degree=5 : tnr.test.mean=1.0000000
+Time difference of 2.269568 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.257803 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=6; mtry=1; nodesize=1 : tnr.test.mean=0.9744738
+Time difference of 8.232041 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  6 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=1.28 : tnr.test.mean=0.9563125
+Time difference of 15.83186 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=0.11; coef0=1.6; degree=2 : tnr.test.mean=1.0000000
+Time difference of 2.354442 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.34622 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=9; mtry=1; nodesize=4 : tnr.test.mean=0.9474023
+Time difference of 8.331161 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  7 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=0.32 : tnr.test.mean=0.9561421
+Time difference of 15.37744 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=0.11; coef0=1.5; degree=2 : tnr.test.mean=0.9851094
+Time difference of 2.251316 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.271589 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=6; mtry=4; nodesize=6 : tnr.test.mean=0.9614646
+Time difference of 8.373663 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  8 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=0.82 : tnr.test.mean=0.9704055
+Time difference of 15.66621 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=0.11; coef0=1.4; degree=5 : tnr.test.mean=1.0000000
+Time difference of 2.267907 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.262152 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=8; mtry=1; nodesize=1 : tnr.test.mean=0.9644425
+Time difference of 8.086528 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  9 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=1.48 : tnr.test.mean=1.0000000
+Time difference of 15.83435 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=0.41; coef0=1.8; degree=2 : tnr.test.mean=1.0000000
+Time difference of 2.30745 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.274361 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=9; mtry=5; nodesize=1 : tnr.test.mean=0.9627498
+Time difference of 8.269725 secs
+Stopped parallelization. All cleaned up.
+*****
+*****Iteration  10 *****
+*****Running  svrrad 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+          Type len Def                                   Constr Req Tunable
+gamma discrete   -   - 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0....   -    TRUE
+      Trafo
+gamma     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 150.
+[Tune] Result: gamma=0.44 : tnr.test.mean=1.0000000
+Time difference of 16.02603 secs
+Stopped parallelization. All cleaned up.
+*****Running  svrpol 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.svm for parameter set:
+           Type len Def                                   Constr Req Tunable
+gamma  discrete   -   - 0.01,0.11,0.21,0.31,0.41,0.51,0.61,0....   -    TRUE
+coef0  discrete   -   - 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9...   -    TRUE
+degree discrete   -   -                                  2,3,4,5   -    TRUE
+       Trafo
+gamma      -
+coef0      -
+degree     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 1680.
+[Tune] Result: gamma=0.11; coef0=1.9; degree=5 : tnr.test.mean=1.0000000
+Time difference of 2.377491 mins
+Stopped parallelization. All cleaned up.
+*****Running  naive 
+Starting parallelization in mode=socket with cpus=16.
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 2.
+Time difference of 2.264088 secs
+Stopped parallelization. All cleaned up.
+*****Running  rf 
+Starting parallelization in mode=socket with cpus=16.
+[Tune] Started tuning learner classif.randomForest for parameter set:
+            Type len Def  Constr Req Tunable Trafo
+ntree    integer   -   - 4 to 10   -    TRUE     -
+mtry     integer   -   -  1 to 7   -    TRUE     -
+nodesize integer   -   - 1 to 15   -    TRUE     -
+With control class: TuneControlGrid
+Imputation value: -0
+Exporting objects to slaves for mode socket: .mlr.slave.options
+Mapping in parallel: mode = socket; level = mlr.tuneParams; cpus = 16; elements = 490.
+[Tune] Result: ntree=6; mtry=7; nodesize=1 : tnr.test.mean=0.9602237
+Time difference of 8.309728 secs
+Stopped parallelization. All cleaned up.
+There were 50 or more warnings (use warnings() to see the first 50)
+> 
+> proc.time()
+     user    system   elapsed 
+  720.979    27.970 10060.744 
